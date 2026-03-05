@@ -1,0 +1,628 @@
+---
+title: "6306 - Case Study 1"
+author: "Josh"
+date: "2026-03-5"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+### LINK TO PRESENTATION
+https://youtu.be/riuNzlxg1Sw
+
+### Libraries
+```{r}
+library(dplyr)
+library(tidyverse)
+library(class)
+library(caret)
+library(e1071)
+library(ggplot2)
+library(GGally)
+library(scales)
+```
+
+### Reading in Main Dataset
+```{r}
+df <- read.csv('/Users/joshtsamuel/SMU/DS-6306 Doing Data Science/Units/Unit 8 & 9 - Case Study/CaseStudy1-data.csv')
+```
+
+### Checking for NAs
+```{r}
+library(naniar)
+gg_miss_var(df)
+# No NAs
+```
+
+### Data Wrangling
+```{r}
+df <- df %>%
+  mutate(
+    BusinessTravel = ordered(BusinessTravel,
+                        levels = c("Non-Travel", "Travel_Frequently", "Travel_Rarely")),
+    Department = ordered(Department,
+                          levels = c("Human Resources", "Research & Development", "Sales")),
+    EducationField = ordered(EducationField,
+                             levels = c ("Human Resources", "Life Sciences", "Marketing", "Medical", "Other", "Technical Degree")),
+  )
+```
+
+### Adding Annual_Salary Column
+```{r}
+df = df %>% mutate(Annual_Salary = 12*MonthlyIncome)
+# getting average salary of employee over all observations
+avg_sal = mean(df$Annual_Salary)
+avg_sal
+```
+
+## Start of EDA
+
+### GGPairs
+```{r}
+# Note: # A - Attrition (Response Variable) : Yes or No
+
+df %>% select(DistanceFromHome, YearsAtCompany, WorkLifeBalance, YearsSinceLastPromotion, Attrition) %>% ggpairs()
+# medians for DistanceFromHome for A-Y and A-N look very similar but the spread for Y is a lot larger
+# medians for YearsatCompany is higher for A-N than A-Y
+# most common WorkLifeBalance score is 3
+# median & overall distribution HourlyRate is slightly greater for A-Y than for A-N. I would have expected the opposite
+
+df %>% select(DailyRate, EducationField, EnvironmentSatisfaction, YearsSinceLastPromotion, Attrition) %>% ggpairs()
+# median for YearsSinceLastPromotion are very similar for A-N and A-Y. I would have expected a greater difference
+# median for DailyRate is  slightly greater for A-N than for A-Y.
+# Each of the EducationFields had similiar distributions
+
+df %>% select(OverTime, PercentSalaryHike, TotalWorkingYears, YearsInCurrentRole, Attrition) %>% ggpairs()
+# overall distribution for YearsInCurrentRole appears greater for A-N than A-Y however medians are close. Wonder if difference is statistically significant. 
+# PercentSalaryHike appears nearly identical for both  A-Y and A-N
+# 0.487 correlation between YearsInCurrentRole & TotalWorkingYears which makes sense
+
+df %>% select(DailyRate, HourlyRate, MonthlyRate, MonthlyIncome, Attrition) %>% ggpairs()
+# MonthlyIncome median and overall distribution is greater for A-N than A-Y which is expected
+# Strangely enough, there appears to be very little correlation between MonthlyIncome, HourlyRate, MonthlyRate, and DailyRate. I would have expected to see that as one increases, the other increases however that is not the case.
+
+df %>% select(BusinessTravel, Age, MonthlyIncome, Attrition) %>% ggpairs()
+# 0.484 correlation between Age & MonthlyIncome
+# Median Age and overall distribution appears greater for A-N than A-Y which I think makes intuitive sense due to younger employees typically being more inclined to look for better opportunities. 
+
+df %>% select(JobLevel, PerformanceRating, MonthlyIncome, YearsWithCurrManager, Attrition) %>% ggpairs()
+# 0.952 correlation between MonthlyIncome and JobLevel which makes intuitive sense
+# 0.367 correlation between YearsWithCurrManager and JobLevel which also makes intuitive sense
+# 0.328 correlation between YearsWithCurrManager and MonthlyIncome
+# YearswithCurrManager appears to have slightly greater median and distribution for A-N than A-Y
+
+df %>% select(MaritalStatus, Department, TrainingTimesLastYear, NumCompaniesWorked,Gender, Attrition) %>% ggpairs()
+# for A-N, married is highest %. For A-Y, single is highest %
+```
+
+
+### Smaller GGPairs based on results
+```{r}
+df %>% select(MonthlyIncome, JobLevel) %>% ggpairs()
+df %>% select(Age, MonthlyIncome) %>% ggpairs()
+df %>% select(Age, Attrition) %>% ggpairs()
+df %>% select(MonthlyIncome, Attrition) %>% ggpairs()
+df %>% select(JobLevel, Attrition) %>% ggpairs()
+
+library(ggplot2)
+library(scales)
+
+df2 <- df %>% mutate(x = factor(MaritalStatus),y = factor(Attrition))  # keep as "No/Yes" or "0/1"
+
+ggplot(df2, aes(x = x, fill = y)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = percent_format()) +
+  labs(x = "Mairtal Status", y = "Attrition Percentage", fill = "Attrition", title = "Attrition Percentage by Marital Status") +
+  theme_minimal()
+```
+
+```{r}
+# Percentage of Yes vs No for Attrition
+df %>%
+  count(Attrition) %>%
+  mutate(Percent = n / sum(n) * 100)
+
+# when Age < 30
+df %>%
+  filter(Age < 30) %>%
+  summarise(
+    Percent_Yes = mean(Attrition == "Yes") * 100
+  )
+
+# when BusinessTravel = Travel_Frequently
+df %>%
+  filter(BusinessTravel == "Travel_Frequently") %>%
+  summarise(
+    Percent_Yes = mean(Attrition == "Yes") * 100
+  )
+
+# histogram of years since last promotion
+hist(df$YearsSinceLastPromotion)
+
+# when YearsSinceLastPromotion is more than 8 years
+df %>%
+  filter(YearsSinceLastPromotion > 8) %>%
+  summarise(
+    Percent_Yes = mean(Attrition == "Yes") * 100
+  )
+```
+
+
+### Subsetting Dataset - df1 (only removing filler variables)
+```{r}
+df1 = df %>%
+  select(-EmployeeCount, -Over18, -StandardHours)
+```
+
+
+### Looking at Factors with biggest contribution to attrition
+```{r}
+# Monthly Income
+df1 %>% ggplot(aes(x = Attrition, y = MonthlyIncome, fill = Attrition)) + geom_boxplot() + labs(title = "Monthly Income by Attrition Status", x = "Attrition", y = "Monthly Income")  + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+# OverTime
+ot_summary <- df1 %>%
+  group_by(OverTime) %>%
+  summarise(AttritionRate = mean(Attrition == "Yes")) 
+ggplot(ot_summary, aes(x = OverTime, y = AttritionRate, fill = OverTime)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Attrition Rate by Overtime Status",
+       x = "Overtime",
+       y = "Attrition Rate") + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+# JobLevel
+jl_summary <- df1 %>%
+  group_by(JobLevel) %>%
+  summarise(AttritionRate = mean(Attrition == "Yes"))
+ggplot(jl_summary, aes(x = JobLevel, y = AttritionRate, fill = JobLevel)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Attrition Rate by Job Level",
+       x = "Job Level",
+       y = "Attrition Rate") + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+# EducationField
+ef_summary <- df1 %>%
+  group_by(EducationField) %>%
+  summarise(AttritionRate = mean(Attrition == "Yes"))
+ggplot(ef_summary, aes(x = EducationField, y = AttritionRate, fill = EducationField)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Attrition Rate by Education Field",
+       x = "Education Field",
+       y = "Attrition Rate") + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+# Marital Status
+ms_summary <- df1 %>%
+  group_by(MaritalStatus) %>%
+  summarise(AttritionRate = mean(Attrition == "Yes"))
+ggplot(ms_summary, aes(x = MaritalStatus, y = AttritionRate, fill = MaritalStatus)) +
+  geom_col() +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Attrition Rate by Marital Status",
+       x = "Marital Status",
+       y = "Attrition Rate") + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+# Age
+df1 %>% ggplot(aes(x = Attrition, y = Age, fill = Attrition)) + geom_boxplot() + labs(title = "Age by Attrition Status", x = "Attrition", y = "Age") + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+# TotalWorkingYears
+df1 %>% ggplot(aes(x = Attrition, y = TotalWorkingYears, fill = Attrition)) + geom_boxplot() + labs(title = "Total Working Years by Attrition Status", x = "Attrition", y = "Total Working Years") + theme(
+  plot.title = element_text(size = 18),
+  axis.title = element_text(size = 13), legend.position = "none"
+)
+```
+
+## Modeling
+
+### NB - including all metrics besides filler variables
+```{r}
+set.seed(6)
+
+iterations = 100
+masterAcc  = numeric(iterations)
+masterSens = numeric(iterations)
+masterSpec = numeric(iterations)
+
+splitPerc = .7
+threshold = 0.30   # <---- change this to experiment
+# makes decision threshold for predicting "Yes" to be .30 instead of traditional ">.50"
+
+
+for(j in 1:iterations)
+{
+  trainIndices = sample(1:nrow(df1), round(splitPerc * nrow(df1)))
+  train = df1[trainIndices,]
+  test  = df1[-trainIndices,]
+  
+  model = naiveBayes(train[,c(2, 4:33)], as.factor(train$Attrition), laplace = 1)
+  
+  # Get predicted probabilities
+  probs = predict(model, test[,c(2, 4:33)], type = "raw")
+  
+  # Apply custom threshold
+  pred = ifelse(probs[, "Yes"] > threshold, "Yes", "No")
+  pred = as.factor(pred)
+  
+  CM = confusionMatrix(pred, as.factor(test$Attrition), positive = "Yes")
+  
+  masterAcc[j]  = CM$overall["Accuracy"]
+  masterSens[j] = CM$byClass["Sensitivity"]
+  masterSpec[j] = CM$byClass["Specificity"]
+}
+
+MeanAcc  = mean(masterAcc)
+MeanSens = mean(masterSens)
+MeanSpec = mean(masterSpec)
+```
+
+### Seeing which variables are the strongest predictors
+```{r}
+model <- naiveBayes(Attrition ~ .- ID, data = train)
+model$tables
+```
+
+### Subsetting Dataset - df1A
+```{r}
+df1A = df %>% select(ID, Attrition, MonthlyIncome, TotalWorkingYears, OverTime, JobLevel, YearsAtCompany, YearsInCurrentRole, NumCompaniesWorked, EducationField, StockOptionLevel, Age, MaritalStatus, Department, JobRole, JobInvolvement, JobSatisfaction)
+```
+
+### NB - looking at  Accuracy, Sensitivity, Specificty - df1A
+```{r}
+set.seed(6)
+
+iterations = 100
+# getting averages for acc, sens, spec
+masterAcc  = numeric(iterations)
+masterSens = numeric(iterations)
+masterSpec = numeric(iterations)
+
+# getting averages for confusion matrix
+masterTP = numeric(iterations)
+masterTN = numeric(iterations)
+masterFP = numeric(iterations)
+masterFN = numeric(iterations)
+
+splitPerc = .7
+threshold = 0.30   # <---- change this to experiment
+# makes decision threshold for predicting "Yes" to be .30 instead of traditional ">.50"
+
+for(j in 1:iterations)
+{
+  trainIndices = sample(1:nrow(df1A), round(splitPerc * nrow(df1A)))
+  train = df1A[trainIndices,]
+  test  = df1A[-trainIndices,]
+  
+  model = naiveBayes(train[,3:17], as.factor(train$Attrition), laplace = 1)
+  
+  # Get predicted probabilities
+  probs = predict(model, test[,3:17], type = "raw")
+  
+  # Apply custom threshold
+  pred = ifelse(probs[, "Yes"] > threshold, "Yes", "No")
+  pred = as.factor(pred)
+  
+  CM = confusionMatrix(pred, as.factor(test$Attrition), positive = "Yes")
+  
+  masterAcc[j]  = CM$overall["Accuracy"]
+  masterSens[j] = CM$byClass["Sensitivity"]
+  masterSpec[j] = CM$byClass["Specificity"]
+  
+  # Extract confusion matrix values
+  masterTP[j] = CM$table["Yes","Yes"]
+  masterTN[j] = CM$table["No","No"]
+  masterFP[j] = CM$table["Yes","No"]
+  masterFN[j] = CM$table["No","Yes"]
+}
+
+MeanAcc  = mean(masterAcc)
+MeanSens = mean(masterSens)
+MeanSpec = mean(masterSpec)
+
+MeanAcc # mean acc
+MeanSens # mean sens
+MeanSpec # mean spec
+
+
+MeanTP = mean(masterTP)
+MeanTN = mean(masterTN)
+MeanFP = mean(masterFP)
+MeanFN = mean(masterFN)
+
+AvgCM = matrix(c(MeanTP, MeanFP,
+                 MeanFN, MeanTN),
+               nrow = 2,
+               byrow = TRUE)
+
+rownames(AvgCM) = c("Pred Yes", "Pred No")
+colnames(AvgCM) = c("Actual Yes", "Actual No")
+
+AvgCM
+```
+
+### Creating Visuals for Slides
+```{r}
+# Changing Data to Long Format
+library(tidyverse)
+
+results_df <- data.frame(
+  Accuracy = masterAcc,
+  Sensitivity = masterSens,
+  Specificity = masterSpec
+)
+# Option A: Histograms + Mean Line
+results_long <- results_df %>%
+  pivot_longer(cols = everything(),
+               names_to = "Metric",
+               values_to = "Value")
+
+results_long$Value <- results_long$Value * 100
+
+ggplot(results_long, aes(x = Value)) +
+  geom_histogram(bins = 15, fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(aes(xintercept = mean(Value)),
+             color = "red",
+             linewidth = 1) +
+  facet_wrap(~Metric, scales = "free") +
+  labs(title = "Distribution of Model Performance (100 Random Splits)",
+       x = "Percentages",
+       y = "Count") +
+  theme_minimal(base_size = 14)
+```
+
+
+### Data Cleanup for KNN Model
+```{r}
+# Had to switch categorical variables to numeric for knn model
+df1B <- df1A %>%
+  mutate(
+    Department = as.numeric(ordered(Department,
+                          levels = c("Human Resources", "Research & Development", "Sales"))),
+    EducationField = as.numeric(ordered(EducationField,
+                             levels = c ("Human Resources", "Life Sciences", "Marketing", "Medical", "Other", "Technical Degree"))),
+    OverTime = as.numeric(ordered(OverTime, 
+                                  levels = c("No", "Yes"))),
+    MaritalStatus = as.numeric(ordered(MaritalStatus,
+                                       levels = c("Divorced", "Single", "Married"))),
+    JobRole = as.numeric(ordered(JobRole,
+                                 levels = c("Sales Executive", "Research Director", "Manufacturing Director", "Research Scientist", "Sales Representative", "Healthcare Representative", "Manager", "Human Resources", "Laboratory Technician")))
+)
+```
+
+### KNN - Looking to see whcih value of K is best - df1
+```{r}
+library(class)
+library(caret)
+
+set.seed(6)
+
+iterations  = 100
+
+splitPerc = .7
+threshold = 0.15   # custom decision threshold
+numks = 20
+
+masterAcc = matrix(nrow = iterations, ncol = numks)
+masterSens = matrix(nrow = iterations, ncol = numks)
+masterSpec = matrix(nrow = iterations, ncol = numks)
+
+for(j in 1:iterations)
+{
+  trainIndices = sample(1:nrow(df1B), round(splitPerc * nrow(df1B)))
+  train = df1B[trainIndices,]
+  test  = df1B[-trainIndices,]
+  
+  # Standardize predictors (for KNN)
+  trainX = scale(train[,3:12])
+  testX = scale(test[,3:12])
+  
+  trainY = as.factor(train$Attrition)
+  testY  = as.factor(test$Attrition)
+  
+  for (i in 1:numks)
+  {
+  # Run KNN
+  knn_pred = knn(train=trainX, test=testX, cl=trainY, k=i, prob=TRUE)
+  
+  # Extract probability of winning class
+  knn_prob = attr(knn_pred, "prob")
+  
+  # Convert to probability of "Yes"
+  prob_yes = ifelse(knn_pred == "Yes",knn_prob, 1 - knn_prob)
+  
+  # Apply custom threshold
+  pred = ifelse(prob_yes > threshold, "Yes", "No")
+  pred = as.factor(pred)
+  
+  CM = confusionMatrix(pred, testY, positive = "Yes")
+  
+  masterAcc[j, i]  = CM$overall["Accuracy"]
+  masterSens[j, i] = CM$byClass["Sensitivity"]
+  masterSpec[j, i] = CM$byClass["Specificity"]
+  }
+}
+
+MeanAcc  = colMeans(masterAcc)
+MeanSens = colMeans(masterSens)
+MeanSpec = colMeans(masterSpec)
+
+plot(seq(1,numks,1),MeanAcc, type = "l", xlab = "k", main = "Mean Accuracy for K = 1-20")
+
+plot(seq(1,numks,1),MeanSens, type = "l", xlab = "k", main = "Mean Sensitivity for K = 1-20")
+
+plot(seq(1,numks,1),MeanSpec, type = "l", xlab = "k", main = "Mean Specificity for K = 1-20")
+
+# lower k's look like better choice
+```
+
+### KNN = 4 - looking at  Accuracy, Sensitivity, Specificty - df1
+```{r}
+library(class)
+library(caret)
+
+set.seed(6)
+
+iterations  = 100
+# getting averages for acc, sens, spec
+masterAcc   = numeric(iterations)
+masterSens  = numeric(iterations)
+masterSpec  = numeric(iterations)
+
+# getting averages for confusion matrix
+masterTP = numeric(iterations)
+masterTN = numeric(iterations)
+masterFP = numeric(iterations)
+masterFN = numeric(iterations)
+
+
+splitPerc = .7
+threshold = 0.15   # custom decision threshold
+k = 4              # choose your k
+
+for(j in 1:iterations)
+{
+  trainIndices = sample(1:nrow(df1B), round(splitPerc * nrow(df1B)))
+  train = df1B[trainIndices,]
+  test  = df1B[-trainIndices,]
+  
+  # Standardize predictors (for KNN)
+  trainX = scale(train[,3:12])
+  testX = scale(test[,3:12])
+  
+  trainY = as.factor(train$Attrition)
+  testY  = as.factor(test$Attrition)
+  
+  
+  # Run KNN
+  knn_pred = knn(train=trainX, test=testX, cl=trainY, k=k, prob=TRUE)
+  
+  # Extract probability of winning class
+  knn_prob = attr(knn_pred, "prob")
+  
+  # Convert to probability of "Yes"
+  prob_yes = ifelse(knn_pred == "Yes",knn_prob, 1 - knn_prob)
+  
+  # Apply custom threshold
+  pred = ifelse(prob_yes > threshold, "Yes", "No")
+  pred = as.factor(pred)
+  
+  CM = confusionMatrix(pred, testY, positive = "Yes")
+  
+  masterAcc[j]  = CM$overall["Accuracy"]
+  masterSens[j] = CM$byClass["Sensitivity"]
+  masterSpec[j] = CM$byClass["Specificity"]
+  
+  # Extract confusion matrix values
+  masterTP[j] = CM$table["Yes","Yes"]
+  masterTN[j] = CM$table["No","No"]
+  masterFP[j] = CM$table["Yes","No"]
+  masterFN[j] = CM$table["No","Yes"]
+}
+
+MeanAcc  = mean(masterAcc)
+MeanSens = mean(masterSens)
+MeanSpec = mean(masterSpec)
+
+MeanTP = mean(masterTP)
+MeanTN = mean(masterTN)
+MeanFP = mean(masterFP)
+MeanFN = mean(masterFN)
+
+AvgCM = matrix(c(MeanTP, MeanFP,
+                 MeanFN, MeanTN),
+               nrow = 2,
+               byrow = TRUE)
+
+rownames(AvgCM) = c("Pred Yes", "Pred No")
+colnames(AvgCM) = c("Actual Yes", "Actual No")
+
+AvgCM
+
+```
+
+
+### Creating Visuals for Slides
+```{r}
+# Changing Data to Long Format
+
+library(tidyverse)
+
+results_df <- data.frame(
+  Accuracy = masterAcc,
+  Sensitivity = masterSens,
+  Specificity = masterSpec
+)
+
+# Option A: Histograms + Mean Line
+
+results_long <- results_df %>%
+  pivot_longer(cols = everything(),
+               names_to = "Metric",
+               values_to = "Value")
+
+results_long$Value <- results_long$Value * 100
+
+ggplot(results_long, aes(x = Value)) +
+  geom_histogram(bins = 15, fill = "steelblue", color = "white", alpha = 0.8) +
+  geom_vline(aes(xintercept = mean(Value)),
+             color = "red",
+             linewidth = 1) +
+  facet_wrap(~Metric, scales = "free") +
+  labs(title = "Distribution of Model Performance (100 Random Splits)",
+       x = "Percentages",
+       y = "Count") +
+  theme_minimal(base_size = 14)
+```
+
+
+## Competition Portion
+```{r}
+# Read in Data
+df300 = read.csv('/Users/joshtsamuel/SMU/DS-6306 Doing Data Science/Units/Unit 8 & 9 - Case Study/CaseStudy1CompSet No Attrition.csv')
+
+# Wrangling
+df300 <- df300 %>%
+  mutate(
+    BusinessTravel = ordered(BusinessTravel,
+                        levels = c("Non-Travel", "Travel_Frequently", "Travel_Rarely")),
+    Department = ordered(Department,
+                          levels = c("Human Resources", "Research & Development", "Sales")),
+    EducationField = ordered(EducationField,
+                             levels = c ("Human Resources", "Life Sciences", "Marketing", "Medical", "Other", "Technical Degree")),
+  )
+
+# Choosing same predictors 
+df300 = df300 %>% select(ID, MonthlyIncome, TotalWorkingYears, OverTime, JobLevel, YearsAtCompany, YearsInCurrentRole, NumCompaniesWorked, EducationField, StockOptionLevel, Age, MaritalStatus, Department, JobRole, JobInvolvement, JobSatisfaction)
+
+
+# Run Model
+set.seed(6)
+threshold = 0.30 
+model = naiveBayes(df1A[,3:17], as.factor(df1A$Attrition), laplace = 1)
+
+probs = predict(model, df300[,2:16], type = "raw")
+pred = ifelse(probs[, "Yes"] > threshold, "Yes", "No")
+
+results <- cbind(df300[, "ID", drop = FALSE], PredProbYes = probs,Attrition = pred)
+
+# removing PredProb columns
+results = results[, c(1,4)]
+
+# writing to csv file
+write.csv(results,
+          '/Users/joshtsamuel/SMU/DS-6306 Doing Data Science/Units/Unit 8 & 9 - Case Study/Case1PredictionsSamuel Attrition.csv',
+          row.names = FALSE)
+```
